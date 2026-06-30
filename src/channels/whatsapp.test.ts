@@ -160,3 +160,21 @@ describe('parseWhatsAppMentions', () => {
     expect(mentions).toEqual(['15551234567@s.whatsapp.net']);
   });
 });
+
+describe('sender allowlist helpers', () => {
+  // The helpers are not exported from whatsapp.ts; these tests exercise the
+  // same normalization rules used by loadAllowedSenders.
+  function digitsOnly(value: string): string {
+    return value.replace(/\D/g, '');
+  }
+
+  it('strips non-digits from phone numbers', () => {
+    expect(digitsOnly('+1 (555) 123-4567')).toBe('15551234567');
+    expect(digitsOnly('5551234567')).toBe('5551234567');
+    expect(digitsOnly('  +44 7700 900000  ')).toBe('447700900000');
+  });
+
+  it('returns empty string when no digits present', () => {
+    expect(digitsOnly('abc')).toBe('');
+  });
+});

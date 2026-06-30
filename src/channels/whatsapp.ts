@@ -48,6 +48,25 @@ import type { ChannelAdapter, ChannelSetup, ConversationInfo, InboundMessage, Ou
 
 const baileysLogger = pino({ level: 'silent' });
 
+/** Extract just the digits from a phone-number-ish string for comparison. */
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+/**
+ * Parse WHATSAPP_ALLOWED_SENDERS from env into a set of digit-only phone
+ * numbers. Empty/unset means no restriction.
+ */
+function loadAllowedSenders(): Set<string> | undefined {
+  const raw = readEnvFile(['WHATSAPP_ALLOWED_SENDERS']).WHATSAPP_ALLOWED_SENDERS;
+  if (!raw) return undefined;
+  const numbers = raw
+    .split(',')
+    .map((s) => digitsOnly(s.trim()))
+    .filter((s) => s.length > 0);
+  return numbers.length > 0 ? new Set(numbers) : undefined;
+}
+
 /**
  * Fetch the latest WhatsApp Web version. Baileys' built-in
  * fetchLatestWaWebVersion scrapes sw.js which is aggressively
@@ -283,6 +302,10 @@ registerChannelAdapter('whatsapp', {
     let connected = false;
     let shuttingDown = false;
     let setupConfig: ChannelSetup;
+
+    // Optional allowlist: if set, only these digit-only phone numbers can
+    // reach the bot. Empty/unset means allow all.
+    const allowedSenders = loadAllowedSenders();
 
     // LID → phone JID mapping (WhatsApp's new ID system)
     const lidToPhoneMap: Record<string, string> = {};
@@ -724,6 +747,22 @@ registerChannelAdapter('whatsapp', {
             }
 
             const isBotMessage = ASSISTANT_HAS_OWN_NUMBER ? false : content.startsWith(`${ASSISTANT_NAME}:`);
+
+            // Optional sender allowlist. When configured, drop messages from
+            // anyone whose phone number is not listed. This prevents unknown
+            // WhatsApp numbers from auto-creating messaging groups and sending
+            // approval cards. Self-chat messages pass because the sender is the
+            // bot's own phone JID (which the operator presumably includes).
+            if (allowedSenders) {
+              const senderDigits = digitsOnly(sender.split('@')[0]);
+              if (!allowedSenders.has(senderDigits)) {
+                log.debug('WhatsApp message dropped — sender not in allowlist', {
+                  sender,
+                  chatJid,
+                });
+                continue;
+              }
+            }
 
             // Check if this reply answers a pending question via slash command
             const pending = pendingQuestions.get(chatJid);
