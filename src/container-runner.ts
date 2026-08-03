@@ -22,7 +22,7 @@ import {
 import { materializeContainerJson } from './container-config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { updateContainerConfigScalars } from './db/container-configs.js';
-import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, isRootlessDocker, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { EGRESS_NETWORK, egressNetworkArgs, ensureEgressNetwork } from './egress-lockdown.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
@@ -454,10 +454,29 @@ async function buildContainerArgs(
     args.push(...hostGatewayArgs());
   }
 
-  // User mapping
+  // User mapping.
+  //
+  // Rootful: run as the host UID so the bind-mounted session files
+  // (inbound.db / outbound.db / .heartbeat) stay writable.
+  //
+  // Rootless: two constraints collide and only one UID/GID pair satisfies both.
+  //   - The host user is ALREADY mapped to container UID 0, so host-owned files
+  //     appear root-owned inside the container. The real host UID maps into the
+  //     subuid range and owns nothing, so every session dies on the first
+  //     /workspace/.heartbeat write with EACCES.
+  //   - But UID 0 is not an option either: Claude Code refuses
+  //     --dangerously-skip-permissions as root, which the provider requests via
+  //     permissionMode: 'bypassPermissions'. That surfaces as an opaque
+  //     "Claude Code process exited with code 1" on every turn.
+  //   So: UID 1000 (the image's non-root `node` user) with GID 0, which maps to
+  //   the host user's primary group. The session files must therefore be
+  //   group-writable — setup writes UMask=0002 into the unit for this.
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+  if (isRootlessDocker()) {
+    args.push('--user', '1000:0');
+    args.push('-e', 'HOME=/home/node');
+  } else if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
