@@ -21,6 +21,11 @@ Migrated from macOS to the VPS on **3 Aug 2026**.
 The slug is derived from the install path, so **moving the directory changes the unit name
 and image tag** and breaks the service. Don't move it.
 
+**This is the live deployment.** The local macOS clone (`com.nanoclaw-v2-69803438`) is a
+cold spare — do not start it. Two NanoClaw hosts polling the same Telegram bot or WhatsApp
+account will conflict. All operational commands in this doc are intended to be run on the
+VPS after `ssh root@169.58.119.23` and `su - nanoclaw`.
+
 ### The macOS install is now a cold spare
 
 `com.nanoclaw-v2-69803438` is unloaded on the Mac. Don't start it — two hosts polling one

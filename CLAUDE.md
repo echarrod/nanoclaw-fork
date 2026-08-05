@@ -215,6 +215,18 @@ Show the output and wait for approval. Installation-specific files (group files,
 This checkout is **live on a VPS**, not just a dev tree. Full operational reference:
 [docs/deployment-vps.md](docs/deployment-vps.md). The load-bearing bits:
 
+- **The live copy is on the VPS, not this local Mac.** Connect to `169.58.119.23` and
+  operate as user `nanoclaw`:
+
+  ```bash
+  ssh root@169.58.119.23
+  su - nanoclaw
+  export XDG_RUNTIME_DIR=/run/user/1001
+  export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus
+  export DOCKER_HOST=unix:///run/user/1001/docker.sock
+  cd ~/nanoclaw-v2
+  ```
+
 - Runs as Unix user `nanoclaw` (uid 1001) at `/home/nanoclaw/nanoclaw-v2` on
   `169.58.119.23`, under a **`systemctl --user`** unit `nanoclaw-v2-1e478a5f`, with a
   **rootless** per-user Docker daemon. `systemctl --user` needs
@@ -241,6 +253,19 @@ This checkout is **live on a VPS**, not just a dev tree. Full operational refere
 
 Run commands directly — don't tell the user to run them.
 
+**Where to run them:** the live instance is on the VPS at `169.58.119.23` (see *This deployment* below). Changes that affect the running host, DB, or container image must be made there, not on this local Mac clone. Use:
+
+```bash
+ssh root@169.58.119.23
+su - nanoclaw
+export XDG_RUNTIME_DIR=/run/user/1001
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus
+export DOCKER_HOST=unix:///run/user/1001/docker.sock
+cd ~/nanoclaw-v2
+```
+
+The local macOS install (`com.nanoclaw-v2-69803438`) is a cold spare; keep it unloaded. Two hosts polling the same Telegram bot or WhatsApp account will conflict.
+
 ```bash
 # Host (Node + pnpm)
 pnpm run dev          # Host with hot reload
@@ -255,16 +280,15 @@ cd container/agent-runner && bun test      # Container tests (bun:test)
 
 Container typecheck is a separate tsconfig — if you edit `container/agent-runner/src/`, run `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit` from root (or `bun run typecheck` from `container/agent-runner/`).
 
-Service management:
+Service management on the **live VPS**:
 ```bash
-# macOS (launchd)
-launchctl load   ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
-
-# Linux (systemd)
-systemctl --user start|stop|restart nanoclaw
+systemctl --user status  nanoclaw-v2-1e478a5f
+systemctl --user restart nanoclaw-v2-1e478a5f
+systemctl --user stop    nanoclaw-v2-1e478a5f
+systemctl --user start   nanoclaw-v2-1e478a5f
 ```
+
+The macOS `launchctl` commands in the previous version of this doc only apply if you deliberately revive the cold spare.
 
 ## Troubleshooting
 
