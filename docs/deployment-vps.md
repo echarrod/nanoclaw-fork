@@ -16,7 +16,9 @@ Migrated from macOS to the VPS on **3 Aug 2026**.
 | systemd unit | `nanoclaw-v2-1e478a5f.service` (**user** unit, not system) |
 | Agent image | `nanoclaw-agent-v2-1e478a5f:latest` (~3.1 GB) |
 | Docker | **rootless**, per-user daemon at `unix:///run/user/1001/docker.sock` |
-| Firewall | `ufw` active — only 22/tcp inbound. NanoClaw needs no inbound port |
+| Firewall | `ufw` active, **default deny incoming** — no ports open at all, including 22 |
+| Public hostname | `nanoclaw.getstorra.com` via its own cloudflared tunnel (`nanoclaw-cloudflared.service`) behind Cloudflare Access |
+| Webhook server | `127.0.0.1:3000` — loopback only (`WEBHOOK_HOST` in `.env`); the tunnel is the only route in |
 
 The slug is derived from the install path, so **moving the directory changes the unit name
 and image tag** and breaks the service. Don't move it.
@@ -24,7 +26,12 @@ and image tag** and breaks the service. Don't move it.
 **This is the live deployment.** The local macOS clone (`com.nanoclaw-v2-69803438`) is a
 cold spare — do not start it. Two NanoClaw hosts polling the same Telegram bot or WhatsApp
 account will conflict. All operational commands in this doc are intended to be run on the
-VPS after `ssh root@169.58.119.23` and `su - nanoclaw`.
+VPS after `ssh hive-tunnel` and `su - nanoclaw`.
+
+**Inbound tcp/22 is closed.** Reach the box with `ssh hive-tunnel`, which proxies SSH over
+Hive's cloudflared tunnel (`hive-ssh.getstorra.com`) — see the `Host hive-tunnel` block in
+`~/.ssh/config`. `ssh root@169.58.119.23` no longer connects. If the tunnel itself is
+down, recovery is the Contabo web console.
 
 ### The macOS install is now a cold spare
 
@@ -40,7 +47,7 @@ needs the right environment. `su - nanoclaw` alone is not enough — `systemctl 
 fails with `Failed to connect to bus: No medium found` without `DBUS_SESSION_BUS_ADDRESS`.
 
 ```bash
-ssh root@169.58.119.23
+ssh hive-tunnel
 su - nanoclaw
 export XDG_RUNTIME_DIR=/run/user/1001
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus
@@ -162,7 +169,7 @@ The Baileys session is half-linked: it connects and can send, but receives nothi
 state lives in **`store/auth/`** (not `data/`).
 
 ```bash
-ssh -t root@169.58.119.23 'su - nanoclaw -c "/home/nanoclaw/repair-whatsapp.sh"'
+ssh -t hive-tunnel 'su - nanoclaw -c "/home/nanoclaw/repair-whatsapp.sh"'
 ```
 
 That script stops the service, backs up `store/auth` to `store/auth.bak-<stamp>`, requests
@@ -303,13 +310,65 @@ House rules so the tenants don't undermine each other:
 - **Don't re-enable the system Docker daemon.** `docker.service`, `docker.socket` and
   `containerd.service` are deliberately disabled. Rootful Docker also writes its own
   iptables rules and **bypasses ufw**; rootless does not.
-- **Nothing binds `0.0.0.0`.** Reach admin UIs over `ssh -L`.
+- **Nothing binds `0.0.0.0`.** Reach admin UIs over `ssh -L`. NanoClaw's webhook server
+  is held to this by `WEBHOOK_HOST=127.0.0.1` in `.env` — see below.
 
 **Incus/LXD was evaluated and rejected**: Docker 29.7.1 cannot start *any* container
 inside an unprivileged Incus container on this kernel (`runc create failed: ... open
 sysctl net.ipv4.ip_unprivileged_port_start: permission denied`). It looks healthy right up
 to the first `docker run` — Incus installs fine, the storage driver comes up `overlayfs`,
 and BuildKit builds succeed. Incus is still installed but unused (zero instances).
+
+## Public hostname and the tunnel
+
+`nanoclaw.getstorra.com` reaches this box through NanoClaw's **own** cloudflared tunnel —
+mirroring Hive rather than sharing with it. Separate tunnel, separate config directory,
+separate unit, so neither stack can clobber the other's config.
+
+| | |
+|---|---|
+| Unit | `nanoclaw-cloudflared.service` (**system** unit, runs as `nanoclaw:nanoclaw`) |
+| Config | `/etc/nanoclaw/cloudflared.yml` — 0640 `root:nanoclaw`, dir 0750 |
+| Credentials | `/etc/nanoclaw/<TUNNEL_ID>.json` — live tunnel secret, **never in git** |
+| Tunnel ID | `9f7eb9d5-e305-4d47-8476-b56229201dc1` |
+| Origin | `http://127.0.0.1:3000` |
+
+```bash
+sudo systemctl status nanoclaw-cloudflared
+sudo journalctl -u nanoclaw-cloudflared -n 50 --no-pager
+```
+
+The unit and a config template are committed at
+[`deploy/vps/`](../deploy/vps/README.md), with the install commands for a rebuilt host.
+They used to exist only on the box, so a rebuild lost them silently.
+
+### The webhook server binds loopback
+
+`src/webhook-server.ts` takes its bind address from `WEBHOOK_HOST` (process environment
+first, then `.env`), defaulting to `0.0.0.0` so stock installs are unaffected. This host
+sets it to loopback:
+
+```bash
+grep '^WEBHOOK_HOST=' ~/nanoclaw-v2/.env      # WEBHOOK_HOST=127.0.0.1
+sudo ss -tlnp | grep :3000                    # 127.0.0.1:3000, not 0.0.0.0:3000
+```
+
+`ufw` defaults to deny incoming, so before this the firewall was the *only* thing keeping
+port 3000 private — one wrong rule exposed it. The tunnel dials the origin from the same
+box, so nothing else needs to reach it.
+
+### Cloudflare Access will block webhooks
+
+Access sits in front of `nanoclaw.getstorra.com`. Telegram, WhatsApp, GitHub and Linear
+callbacks cannot complete an SSO flow, so **the first webhook wired up needs a bypass
+scoped to exactly that path**, plus signature verification on that route. Nothing is
+broken today only because no webhook is wired to the public URL yet.
+
+Same constraint and same failure mode as Hive's Slack callback: a bypass drawn one path
+segment too wide un-gates everything under it. The recipe — path-scoped Access app,
+bypass policy, and the blast-radius `curl` checks that prove the rest is still gated — is
+in Hive's [`docs/host.md`](https://github.com/storra-eng/hive/blob/main/docs/host.md) §4.
+Reuse it rather than re-deriving it.
 
 ## Rebuilding
 

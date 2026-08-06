@@ -215,11 +215,12 @@ Show the output and wait for approval. Installation-specific files (group files,
 This checkout is **live on a VPS**, not just a dev tree. Full operational reference:
 [docs/deployment-vps.md](docs/deployment-vps.md). The load-bearing bits:
 
-- **The live copy is on the VPS, not this local Mac.** Connect to `169.58.119.23` and
+- **The live copy is on the VPS, not this local Mac.** Inbound tcp/22 is closed — reach
+  `169.58.119.23` with `ssh hive-tunnel` (SSH over Hive's cloudflared tunnel), then
   operate as user `nanoclaw`:
 
   ```bash
-  ssh root@169.58.119.23
+  ssh hive-tunnel
   su - nanoclaw
   export XDG_RUNTIME_DIR=/run/user/1001
   export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus
@@ -256,7 +257,7 @@ Run commands directly — don't tell the user to run them.
 **Where to run them:** the live instance is on the VPS at `169.58.119.23` (see *This deployment* below). Changes that affect the running host, DB, or container image must be made there, not on this local Mac clone. Use:
 
 ```bash
-ssh root@169.58.119.23
+ssh hive-tunnel
 su - nanoclaw
 export XDG_RUNTIME_DIR=/run/user/1001
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus
