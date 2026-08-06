@@ -11,6 +11,7 @@ import path from 'path';
 
 import { log } from '../src/log.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
+import { isRootlessDocker } from '../src/container-runtime.js';
 import { writeUpgradeState } from '../src/upgrade-state.js';
 import { cleanupUnhealthyPeers } from './peer-cleanup.js';
 import {
@@ -313,6 +314,11 @@ function setupSystemd(
     systemctlPrefix = 'systemctl --user';
   }
 
+  // Rootless Docker runs agent containers as GID 0, which maps to this user's
+  // primary group; the session files it must write are created by this service,
+  // so they have to be group-writable. See the user mapping in container-runner.
+  const umaskLine = isRootlessDocker() ? 'UMask=0002\n' : '';
+
   const unit = `[Unit]
 Description=NanoClaw Personal Assistant
 After=network.target
@@ -324,7 +330,7 @@ WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
 KillMode=process
-Environment=HOME=${homeDir}
+${umaskLine}Environment=HOME=${homeDir}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log

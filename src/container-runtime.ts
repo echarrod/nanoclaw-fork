@@ -20,6 +20,31 @@ export function hostGatewayArgs(): string[] {
   return [];
 }
 
+/**
+ * True when the Docker daemon runs rootless.
+ *
+ * Rootless remaps UIDs: the host user becomes container UID 0, and any other
+ * container UID maps into the subuid range. That changes what a bind-mounted,
+ * host-owned file looks like from inside the container, so the spawn args have
+ * to differ. Cached — this shells out.
+ */
+let rootlessCache: boolean | null = null;
+export function isRootlessDocker(): boolean {
+  if (rootlessCache !== null) return rootlessCache;
+  try {
+    const out = execSync(`${CONTAINER_RUNTIME_BIN} info --format '{{json .SecurityOptions}}'`, {
+      stdio: 'pipe',
+      encoding: 'utf-8',
+      timeout: 15000,
+    });
+    rootlessCache = out.includes('name=rootless');
+  } catch {
+    rootlessCache = false;
+  }
+  log.debug('Docker rootless detection', { rootless: rootlessCache });
+  return rootlessCache;
+}
+
 /** Returns CLI args for a readonly bind mount. */
 export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
   return ['-v', `${hostPath}:${containerPath}:ro`];
