@@ -29,12 +29,21 @@ export interface AdditionalMountConfig {
   readonly?: boolean;
 }
 
+/** A read-only skill checkout pinned to an exact Git revision. */
+export interface ExternalSkillRootConfig {
+  name: string;
+  hostPath: string;
+  revision: string;
+  skills: string[];
+}
+
 /** Shape of the materialized `container.json` file read by the container runner. */
 export interface ContainerConfig {
   mcpServers: Record<string, McpServerConfig>;
   packages: { apt: string[]; npm: string[] };
   imageTag?: string;
   additionalMounts: AdditionalMountConfig[];
+  externalSkillRoots?: ExternalSkillRootConfig[];
   skills: string[] | 'all';
   provider?: string;
   groupName?: string;
@@ -55,6 +64,7 @@ export function configFromDb(row: ContainerConfigRow, group: AgentGroup): Contai
     },
     imageTag: row.image_tag ?? undefined,
     additionalMounts: JSON.parse(row.additional_mounts) as AdditionalMountConfig[],
+    externalSkillRoots: JSON.parse(row.external_skill_roots ?? '[]') as ExternalSkillRootConfig[],
     skills: JSON.parse(row.skills) as string[] | 'all',
     provider: row.provider ?? undefined,
     groupName: group.name,

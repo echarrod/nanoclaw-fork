@@ -27,6 +27,7 @@ function presentConfig(row: ContainerConfigRow): Record<string, unknown> {
     packages_apt: JSON.parse(row.packages_apt),
     packages_npm: JSON.parse(row.packages_npm),
     additional_mounts: JSON.parse(row.additional_mounts),
+    external_skill_roots: JSON.parse(row.external_skill_roots ?? '[]'),
     cli_scope: row.cli_scope,
     updated_at: row.updated_at,
   };
@@ -278,6 +279,29 @@ registerResource({
         updateContainerConfigJson(id, 'mcp_servers', servers);
 
         return { added: name, servers };
+      },
+    },
+    'config set-external-skill-roots': {
+      access: 'approval',
+      description:
+        'Replace the pinned external skill roots for a group. Requires `ncl groups restart` to take effect. ' +
+        'Use --id <group-id> --roots <json-array>, where each root has name, hostPath, revision, and skills.',
+      handler: async (args) => {
+        const id = args.id as string;
+        if (!id) throw new Error('--id is required');
+        if (typeof args.roots !== 'string') throw new Error('--roots <json-array> is required');
+        const row = getContainerConfig(id);
+        if (!row) throw new Error(`No container config for group: ${id}`);
+
+        let roots: unknown;
+        try {
+          roots = JSON.parse(args.roots);
+        } catch (error) {
+          throw new Error('--roots must be valid JSON', { cause: error });
+        }
+        if (!Array.isArray(roots)) throw new Error('--roots must be a JSON array');
+        updateContainerConfigJson(id, 'external_skill_roots', roots);
+        return { external_skill_roots: roots };
       },
     },
     'config remove-mcp-server': {
