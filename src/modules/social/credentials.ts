@@ -16,17 +16,18 @@ export interface EncryptedSocialValue {
   authTag: Buffer;
 }
 
-function credentialKey(): Buffer {
-  const configured = process.env.SOCIAL_CREDENTIALS_KEY;
-  if (!configured) {
+export function validateSocialCredentialsKey(configured: string | undefined): Buffer {
+  if (!configured)
     throw new Error('SOCIAL_CREDENTIALS_KEY is required before social credentials can be stored or read');
-  }
-
   const key = Buffer.from(configured, 'base64');
   if (key.length !== 32) {
     throw new Error('SOCIAL_CREDENTIALS_KEY must be a base64-encoded 32-byte key');
   }
   return key;
+}
+
+function credentialKey(): Buffer {
+  return validateSocialCredentialsKey(process.env.SOCIAL_CREDENTIALS_KEY);
 }
 
 export function encryptSocialValue(value: string, context: string): EncryptedSocialValue {

@@ -6,9 +6,19 @@ OAuth client IDs and the public callback base URL are normal host configuration.
 
 ## Host master key
 
-Set `SOCIAL_CREDENTIALS_KEY` in the NanoClaw service environment, not in the project `.env` file. It must be a base64-encoded 32-byte key. Generate it locally on the host and put it in the service manager's protected environment configuration; never paste it into chat or commit it.
+Set `SOCIAL_CREDENTIALS_KEY` in the NanoClaw service environment, not in the project `.env` file. It must be a base64-encoded 32-byte key. Keep a copy in your password manager, never in chat or source control.
 
-Restart NanoClaw after setting the key. Losing the key makes existing encrypted social credentials unrecoverable, so retain it in the same password manager or secure operations store as other deployment secrets.
+On the host, save that key through the hidden-prompt command. It writes a mode-`0600` systemd EnvironmentFile and a narrow user-service drop-in - it does not print or put the key in shell history:
+
+```sh
+pnpm social:master-key -- --systemd-unit nanoclaw-v2-1e478a5f.service
+systemctl --user daemon-reload
+systemctl --user restart nanoclaw-v2-1e478a5f.service
+```
+
+It refuses to overwrite an existing key file - replacing a key after credentials exist would make them unreadable.
+
+Losing the key makes existing encrypted social credentials unrecoverable, so retain it in the same password manager or secure operations store as other deployment secrets.
 
 ## Enter a credential
 
