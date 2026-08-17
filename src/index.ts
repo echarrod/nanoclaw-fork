@@ -18,6 +18,7 @@ import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { routeInbound } from './router.js';
 import { log } from './log.js';
 import { enforceUpgradeTripwire } from './upgrade-state.js';
+import { registerSocialOAuthCallbacks } from './modules/social/oauth.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
 // circular import cycle: src/index.ts imports src/modules/index.js for side
@@ -83,6 +84,7 @@ async function main(): Promise<void> {
   const db = initDb(dbPath);
   runMigrations(db);
   log.info('Central DB ready', { path: dbPath });
+  registerSocialOAuthCallbacks();
 
   // 1b. Backfill container_configs from legacy container.json files.
   // Idempotent — skips groups that already have a config row.

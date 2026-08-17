@@ -1,3 +1,5 @@
+import { createCipheriv, randomBytes } from 'crypto';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { closeDb, getDb, initTestDb } from '../../db/connection.js';
@@ -60,5 +62,24 @@ describe('social credential store', () => {
         value: 'value',
       }),
     ).toThrow('SOCIAL_CREDENTIALS_KEY is required');
+  });
+
+  it('reads credentials saved before context binding was introduced', () => {
+    configureTestKey();
+    const db = initTestDb();
+    runMigrations(db);
+    createGroup();
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', Buffer.from(process.env.SOCIAL_CREDENTIALS_KEY!, 'base64'), iv);
+    const ciphertext = Buffer.concat([cipher.update('old-app-password', 'utf8'), cipher.final()]);
+    db.prepare(
+      `INSERT INTO social_credentials (
+        agent_group_id, provider, credential_kind, ciphertext, iv, auth_tag, created_at, updated_at
+      ) VALUES (?, 'bluesky', 'app-password', ?, ?, ?, ?, ?)`,
+    ).run(GROUP_ID, ciphertext, iv, cipher.getAuthTag(), new Date().toISOString(), new Date().toISOString());
+
+    expect(loadSocialCredential({ agentGroupId: GROUP_ID, provider: 'bluesky', credentialKind: 'app-password' })).toBe(
+      'old-app-password',
+    );
   });
 });

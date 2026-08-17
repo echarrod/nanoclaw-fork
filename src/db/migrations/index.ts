@@ -20,6 +20,7 @@ import { migration018 } from './018-approvals-approver-user-id.js';
 import { migration019 } from './019-external-skill-roots.js';
 import { migration020 } from './020-social-publishing.js';
 import { migration021 } from './021-social-credentials.js';
+import { migration022 } from './022-social-oauth-states.js';
 
 export interface Migration {
   version: number;
@@ -56,6 +57,7 @@ export const migrations: Migration[] = [
   migration019,
   migration020,
   migration021,
+  migration022,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a

@@ -174,7 +174,9 @@ function ensureServer(): void {
       });
       await fromWebResponse(webRes, res);
     } catch (err) {
-      log.error('Webhook handler error', { adapter: adapterName, url: req.url, err });
+      // Query parameters can contain OAuth authorization codes. Keep only the
+      // routing path in logs so an unexpected handler error cannot disclose one.
+      log.error('Webhook handler error', { adapter: adapterName, path: url.split('?')[0], err });
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
         res.end('Internal Server Error');

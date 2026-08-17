@@ -10,6 +10,12 @@ interface EncryptedCredentialRow {
   auth_tag: Buffer;
 }
 
+export interface EncryptedSocialValue {
+  ciphertext: Buffer;
+  iv: Buffer;
+  authTag: Buffer;
+}
+
 function credentialKey(): Buffer {
   const configured = process.env.SOCIAL_CREDENTIALS_KEY;
   if (!configured) {
@@ -23,6 +29,30 @@ function credentialKey(): Buffer {
   return key;
 }
 
+export function encryptSocialValue(value: string, context: string): EncryptedSocialValue {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', credentialKey(), iv);
+  cipher.setAAD(Buffer.from(context, 'utf8'));
+  return {
+    ciphertext: Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]),
+    iv,
+    authTag: cipher.getAuthTag(),
+  };
+}
+
+export function decryptSocialValue(value: EncryptedSocialValue, context: string): string {
+  const decipher = createDecipheriv('aes-256-gcm', credentialKey(), value.iv);
+  decipher.setAAD(Buffer.from(context, 'utf8'));
+  decipher.setAuthTag(value.authTag);
+  return Buffer.concat([decipher.update(value.ciphertext), decipher.final()]).toString('utf8');
+}
+
+function decryptLegacySocialCredential(value: EncryptedSocialValue): string {
+  const decipher = createDecipheriv('aes-256-gcm', credentialKey(), value.iv);
+  decipher.setAuthTag(value.authTag);
+  return Buffer.concat([decipher.update(value.ciphertext), decipher.final()]).toString('utf8');
+}
+
 /**
  * Store a credential for host-side use only. Values must never be returned by
  * CLI resources, included in logs, or mounted into an agent container.
@@ -34,11 +64,7 @@ export function saveSocialCredential(input: {
   value: string;
 }): void {
   if (!input.value) throw new Error('Social credential value cannot be empty');
-  const key = credentialKey();
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const ciphertext = Buffer.concat([cipher.update(input.value, 'utf8'), cipher.final()]);
-  const authTag = cipher.getAuthTag();
+  const encrypted = encryptSocialValue(input.value, `${input.agentGroupId}:${input.provider}:${input.credentialKind}`);
   const now = new Date().toISOString();
 
   getDb()
@@ -52,7 +78,16 @@ export function saveSocialCredential(input: {
         auth_tag = excluded.auth_tag,
         updated_at = excluded.updated_at`,
     )
-    .run(input.agentGroupId, input.provider, input.credentialKind, ciphertext, iv, authTag, now, now);
+    .run(
+      input.agentGroupId,
+      input.provider,
+      input.credentialKind,
+      encrypted.ciphertext,
+      encrypted.iv,
+      encrypted.authTag,
+      now,
+      now,
+    );
 }
 
 /** Returns the decrypted host-only credential, or undefined when not configured. */
@@ -70,9 +105,14 @@ export function loadSocialCredential(input: {
     .get(input.agentGroupId, input.provider, input.credentialKind) as EncryptedCredentialRow | undefined;
   if (!row) return undefined;
 
-  const decipher = createDecipheriv('aes-256-gcm', credentialKey(), row.iv);
-  decipher.setAuthTag(row.auth_tag);
-  return Buffer.concat([decipher.update(row.ciphertext), decipher.final()]).toString('utf8');
+  const encrypted = { ciphertext: row.ciphertext, iv: row.iv, authTag: row.auth_tag };
+  try {
+    return decryptSocialValue(encrypted, `${input.agentGroupId}:${input.provider}:${input.credentialKind}`);
+  } catch {
+    // Credentials saved before context binding used GCM without AAD. Retain
+    // read compatibility; each subsequent save upgrades that row automatically.
+    return decryptLegacySocialCredential(encrypted);
+  }
 }
 
 /** Safe for status surfaces - does not reveal the credential or metadata. */
