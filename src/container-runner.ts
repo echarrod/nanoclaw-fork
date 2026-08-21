@@ -20,9 +20,16 @@ import {
   TIMEZONE,
 } from './config.js';
 import { materializeContainerJson } from './container-config.js';
+import { externalSkillMounts, resolveSelectedSkills } from './external-skills.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { updateContainerConfigScalars } from './db/container-configs.js';
-import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, isRootlessDocker, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import {
+  CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
+  isRootlessDocker,
+  readonlyMountArgs,
+  stopContainer,
+} from './container-runtime.js';
 import { EGRESS_NETWORK, egressNetworkArgs, ensureEgressNetwork } from './egress-lockdown.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
@@ -347,6 +354,11 @@ export function buildMounts(
     mounts.push({ hostPath: skillsSrc, containerPath: '/app/skills', readonly: true });
   }
 
+  // External skills are configured per group, mounted read-only, and
+  // validated against their pinned Git revision before the agent can see
+  // them. The separate mount base makes their provenance obvious.
+  mounts.push(...externalSkillMounts(containerConfig));
+
   // Additional mounts from container config
   if (containerConfig.additionalMounts && containerConfig.additionalMounts.length > 0) {
     const validated = validateAdditionalMounts(containerConfig.additionalMounts, agentGroup.name);
@@ -372,8 +384,8 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
     fs.mkdirSync(skillsDir, { recursive: true });
   }
 
-  const desired = selectedSkillNames(containerConfig);
-  const desiredSet = new Set(desired);
+  const desired = resolveSelectedSkills(containerConfig);
+  const desiredSet = new Set(desired.map((skill) => skill.name));
 
   // Remove symlinks not in the desired set
   for (const entry of fs.readdirSync(skillsDir)) {
@@ -391,7 +403,7 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
 
   // Create symlinks for desired skills (container path targets)
   for (const skill of desired) {
-    const linkPath = path.join(skillsDir, skill);
+    const linkPath = path.join(skillsDir, skill.name);
     let exists = false;
     try {
       fs.lstatSync(linkPath);
@@ -400,7 +412,7 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
       /* missing */
     }
     if (!exists) {
-      fs.symlinkSync(`/app/skills/${skill}`, linkPath);
+      fs.symlinkSync(skill.containerPath, linkPath);
     }
   }
 }
@@ -410,17 +422,7 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
  * from `container/skills/` so newly-added upstream skills appear automatically.
  */
 function selectedSkillNames(containerConfig: import('./container-config.js').ContainerConfig): string[] {
-  if (containerConfig.skills !== 'all') return containerConfig.skills;
-  const sharedSkillsDir = path.join(process.cwd(), 'container', 'skills');
-  return fs.existsSync(sharedSkillsDir)
-    ? fs.readdirSync(sharedSkillsDir).filter((e) => {
-        try {
-          return fs.statSync(path.join(sharedSkillsDir, e)).isDirectory();
-        } catch {
-          return false;
-        }
-      })
-    : [];
+  return resolveSelectedSkills(containerConfig).map((skill) => skill.name);
 }
 
 async function buildContainerArgs(

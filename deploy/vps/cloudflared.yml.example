@@ -1,0 +1,18 @@
+# Rendered to /etc/nanoclaw/cloudflared.yml (0640 root:nanoclaw).
+#
+# Nanoclaw's own tunnel and config, NOT cloudflared's global
+# /etc/cloudflared/config.yml and not Hive's — two stacks sharing one file
+# would clobber each other.
+#
+# Replace __TUNNEL_ID__ with the tunnel UUID; the credentials JSON of the same
+# name is a live tunnel secret and is deliberately not in this repo.
+tunnel: __TUNNEL_ID__
+credentials-file: /etc/nanoclaw/__TUNNEL_ID__.json
+
+ingress:
+  # The webhook server binds 127.0.0.1 (WEBHOOK_HOST in .env), so this tunnel
+  # is the only route in and Cloudflare Access in front of the hostname is the
+  # entire perimeter.
+  - hostname: nanoclaw.getstorra.com
+    service: http://127.0.0.1:3000
+  - service: http_status:404

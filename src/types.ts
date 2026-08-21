@@ -24,6 +24,7 @@ export interface ContainerConfigRow {
   packages_apt: string; // JSON: string[]
   packages_npm: string; // JSON: string[]
   additional_mounts: string; // JSON: AdditionalMountConfig[]
+  external_skill_roots?: string; // JSON: ExternalSkillRootConfig[]
   cli_scope: string; // 'disabled' | 'group' | 'global'
   updated_at: string;
 }

@@ -1,0 +1,36 @@
+[Unit]
+Description=Nanoclaw: cloudflared tunnel for nanoclaw.getstorra.com
+Documentation=https://github.com/echarrod/nanoclaw/blob/main/docs/deployment-vps.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+
+# Not root. This process holds the tunnel credentials and needs nothing
+# privileged. /etc/nanoclaw is 0750 root:nanoclaw so it can traverse, and the
+# credentials JSON is 0640 root:nanoclaw so it can read it.
+#
+# NanoClaw itself is a *user* unit (nanoclaw-v2-<slug>.service), so this system
+# unit cannot order itself after it. It does not need to: cloudflared retries
+# the origin until the webhook server is listening.
+User=nanoclaw
+Group=nanoclaw
+
+# Config and credentials live under /etc/nanoclaw, NOT cloudflared's global
+# /etc/cloudflared/config.yml: this host also runs Hive, and two stacks each
+# managing that one default file would clobber each other. One config and one
+# service per stack instead.
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /etc/nanoclaw/cloudflared.yml tunnel run
+
+# Outbound-only: the tunnel dials Cloudflare, nothing dials in. This is what
+# lets ufw drop inbound tcp/22 entirely.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

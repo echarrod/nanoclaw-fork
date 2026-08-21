@@ -9,14 +9,23 @@
  * to its owning Chat instance. Raw routes let modules receive non-Chat-SDK
  * webhooks (GitHub, payment providers, health checks) on the same server
  * without editing this file or opening a second port.
+ *
+ * Bind address and port come from `WEBHOOK_HOST` / `WEBHOOK_PORT`, read from
+ * the process environment first and `.env` second.
  */
 import http from 'http';
 
 import type { Chat } from 'chat';
 
+import { readEnvFile } from './env.js';
 import { log } from './log.js';
 
 const DEFAULT_PORT = 3000;
+// Every interface, so a stock install keeps working behind whatever proxy or
+// port mapping it already has. Deployments that put a tunnel or reverse proxy
+// on the same box should set WEBHOOK_HOST=127.0.0.1 so the firewall is a
+// second layer rather than the only thing keeping the port private.
+const DEFAULT_HOST = '0.0.0.0';
 
 interface WebhookEntry {
   chat: Chat;
@@ -107,10 +116,24 @@ export function registerWebhookHandler(path: string, handler: RawWebhookHandler)
   log.info('Webhook handler registered', { path: `/webhook/${path}` });
 }
 
+/**
+ * Where the shared server should listen. `process.env` wins over `.env` so a
+ * systemd/launchd unit can override the file without editing it.
+ */
+export function resolveBindTarget(): { host: string; port: number } {
+  const envConfig = readEnvFile(['WEBHOOK_PORT', 'WEBHOOK_HOST']);
+  const rawPort = process.env.WEBHOOK_PORT || envConfig.WEBHOOK_PORT;
+  const parsed = parseInt(rawPort || '', 10);
+  return {
+    host: process.env.WEBHOOK_HOST || envConfig.WEBHOOK_HOST || DEFAULT_HOST,
+    port: Number.isFinite(parsed) ? parsed : DEFAULT_PORT,
+  };
+}
+
 function ensureServer(): void {
   if (server) return;
 
-  const port = parseInt(process.env.WEBHOOK_PORT || String(DEFAULT_PORT), 10);
+  const { host, port } = resolveBindTarget();
 
   server = http.createServer(async (req, res) => {
     const url = req.url || '/';
@@ -151,7 +174,9 @@ function ensureServer(): void {
       });
       await fromWebResponse(webRes, res);
     } catch (err) {
-      log.error('Webhook handler error', { adapter: adapterName, url: req.url, err });
+      // Query parameters can contain OAuth authorization codes. Keep only the
+      // routing path in logs so an unexpected handler error cannot disclose one.
+      log.error('Webhook handler error', { adapter: adapterName, path: url.split('?')[0], err });
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
         res.end('Internal Server Error');
@@ -159,8 +184,8 @@ function ensureServer(): void {
     }
   });
 
-  server.listen(port, '0.0.0.0', () => {
-    log.info('Webhook server started', { port, adapters: [...routes.keys()] });
+  server.listen(port, host, () => {
+    log.info('Webhook server started', { host, port, adapters: [...routes.keys()] });
   });
 }
 

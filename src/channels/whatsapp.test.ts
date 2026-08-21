@@ -16,7 +16,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { computeIsMention, isBotMentionedInGroup, parseWhatsAppMentions } from './whatsapp.js';
+import { appendMediaFailureNote, computeIsMention, isBotMentionedInGroup, parseWhatsAppMentions } from './whatsapp.js';
 
 const BOT_PHONE_JID = '15550009999@s.whatsapp.net';
 const BOT_LID_USER = '987654321';
@@ -163,11 +163,7 @@ describe('parseWhatsAppMentions', () => {
 
 describe('sender allowlist helpers', () => {
   // The helpers are not exported from whatsapp.ts; these tests exercise the
-  // same normalization rules used by loadAllowedSenders.
-  function digitsOnly(value: string): string {
-    return value.replace(/\D/g, '');
-  }
-
+  // exported pure functions that mirror the same normalization rules.
   it('strips non-digits from phone numbers', () => {
     expect(digitsOnly('+1 (555) 123-4567')).toBe('15551234567');
     expect(digitsOnly('5551234567')).toBe('5551234567');
@@ -176,5 +172,32 @@ describe('sender allowlist helpers', () => {
 
   it('returns empty string when no digits present', () => {
     expect(digitsOnly('abc')).toBe('');
+  });
+});
+
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+describe('appendMediaFailureNote', () => {
+  it('returns content unchanged when nothing failed', () => {
+    expect(appendMediaFailureNote('hello', [])).toBe('hello');
+  });
+
+  it('appends the note on its own line when a captioned message has a failed download', () => {
+    expect(appendMediaFailureNote('check this out', ['image'])).toBe('check this out\n[image could not be downloaded]');
+  });
+
+  it('uses the note as the content when an uncaptioned media message fails (would otherwise be dropped)', () => {
+    // Regression guard: an uncaptioned image whose download fails must still
+    // produce a non-empty message, or the empty-message guard skips it and the
+    // agent never learns media was sent.
+    expect(appendMediaFailureNote('', ['image'])).toBe('[image could not be downloaded]');
+  });
+
+  it('lists each failed media type when several fail together', () => {
+    expect(appendMediaFailureNote('', ['image', 'document'])).toBe(
+      '[image could not be downloaded] [document could not be downloaded]',
+    );
   });
 });

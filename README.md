@@ -57,6 +57,12 @@ See [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md) for what's different an
 
 </details>
 
+> **This checkout is a live deployment.** It runs on a VPS as a dedicated Unix user with
+> its own rootless Docker daemon, which changes how the service is managed and adds one
+> deliberate divergence from upstream. Day-to-day commands, logs, channel state and
+> troubleshooting live in **[docs/deployment-vps.md](docs/deployment-vps.md)** — read that
+> before running setup, `/update-nanoclaw`, or anything that restarts the service.
+
 ## Philosophy
 
 **Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.

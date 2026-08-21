@@ -210,9 +210,62 @@ git log upstream/main..HEAD --oneline
 
 Show the output and wait for approval. Installation-specific files (group files, .claude/settings.json, local configs) should not be included.
 
+## This deployment (read before touching the running instance)
+
+This checkout is **live on a VPS**, not just a dev tree. Full operational reference:
+[docs/deployment-vps.md](docs/deployment-vps.md). The load-bearing bits:
+
+- **The live copy is on the VPS, not this local Mac.** Inbound tcp/22 is closed — reach
+  `169.58.119.23` with `ssh hive-tunnel` (SSH over Hive's cloudflared tunnel), then
+  operate as user `nanoclaw`:
+
+  ```bash
+  ssh hive-tunnel
+  su - nanoclaw
+  export XDG_RUNTIME_DIR=/run/user/1001
+  export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus
+  export DOCKER_HOST=unix:///run/user/1001/docker.sock
+  cd ~/nanoclaw-v2
+  ```
+
+- Runs as Unix user `nanoclaw` (uid 1001) at `/home/nanoclaw/nanoclaw-v2` on
+  `169.58.119.23`, under a **`systemctl --user`** unit `nanoclaw-v2-1e478a5f`, with a
+  **rootless** per-user Docker daemon. `systemctl --user` needs
+  `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus` or it fails with
+  `Failed to connect to bus: No medium found`.
+- **Deliberate divergence from upstream:** agent containers spawn as `--user 1000:0`.
+  Under rootless, the host user is already container UID 0 (so the real host UID can't
+  write the mounts), but UID 0 makes Claude Code refuse
+  `--dangerously-skip-permissions` — which surfaces only as
+  `Claude Code process exited with code 1` on *every* turn while a manual `claude -p`
+  works. Needs `UMask=0002` on the unit + group-writable session files.
+  Committed on `ed/rootless-docker-uid-mapping`, and **the VPS install runs on that
+  branch** — so it's tracked source, not a droppable working-tree edit. After any update
+  or merge, verify with `grep -c "1000:0" src/container-runner.ts` (must be 1); rebase the
+  branch rather than abandoning it until this lands upstream.
+- Channel adapters are already present in the tree; `/add-telegram` / `/add-whatsapp`
+  are **not** needed for this install.
+- `pnpm run auth` is broken (points at a non-existent `src/whatsapp-auth.ts`), and
+  `setup/whatsapp-auth.ts` only *exports* `run()` — invoking it directly exits 0 doing
+  nothing. Use `pnpm exec tsx setup/index.ts --step whatsapp-auth ...`.
+- Container logs are lost on exit (`--rm`) — capture them while the container is alive.
+
 ## Development
 
 Run commands directly — don't tell the user to run them.
+
+**Where to run them:** the live instance is on the VPS at `169.58.119.23` (see *This deployment* below). Changes that affect the running host, DB, or container image must be made there, not on this local Mac clone. Use:
+
+```bash
+ssh hive-tunnel
+su - nanoclaw
+export XDG_RUNTIME_DIR=/run/user/1001
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus
+export DOCKER_HOST=unix:///run/user/1001/docker.sock
+cd ~/nanoclaw-v2
+```
+
+The local macOS install (`com.nanoclaw-v2-69803438`) is a cold spare; keep it unloaded. Two hosts polling the same Telegram bot or WhatsApp account will conflict.
 
 ```bash
 # Host (Node + pnpm)
@@ -228,16 +281,15 @@ cd container/agent-runner && bun test      # Container tests (bun:test)
 
 Container typecheck is a separate tsconfig — if you edit `container/agent-runner/src/`, run `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit` from root (or `bun run typecheck` from `container/agent-runner/`).
 
-Service management:
+Service management on the **live VPS**:
 ```bash
-# macOS (launchd)
-launchctl load   ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
-
-# Linux (systemd)
-systemctl --user start|stop|restart nanoclaw
+systemctl --user status  nanoclaw-v2-1e478a5f
+systemctl --user restart nanoclaw-v2-1e478a5f
+systemctl --user stop    nanoclaw-v2-1e478a5f
+systemctl --user start   nanoclaw-v2-1e478a5f
 ```
+
+The macOS `launchctl` commands in the previous version of this doc only apply if you deliberately revive the cold spare.
 
 ## Troubleshooting
 
@@ -274,6 +326,7 @@ This project uses pnpm with `minimumReleaseAge: 4320` (3 days) in `pnpm-workspac
 | [docs/setup-wiring.md](docs/setup-wiring.md) | What's wired, what's open in the setup flow |
 | [docs/architecture-diagram.md](docs/architecture-diagram.md) | Diagram version of the architecture |
 | [docs/build-and-runtime.md](docs/build-and-runtime.md) | Runtime split (Node host + Bun container), lockfiles, image build surface, CI, key invariants |
+| [docs/deployment-vps.md](docs/deployment-vps.md) | **This install** — VPS host, rootless Docker, service commands, logs, channel state, troubleshooting |
 | [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md) | v1→v2 architecture diff — vocabulary for where v1 things moved |
 | [docs/migration-dev.md](docs/migration-dev.md) | Migration development guide — testing, debugging, dev loop |
 | [docs/provider-migration.md](docs/provider-migration.md) | Switching a live agent group between providers (e.g. Claude → Codex) — what carries over, rollback |
